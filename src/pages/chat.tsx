@@ -5,7 +5,7 @@ import {
   useForm,
   useAsync,
 } from "@devvit/public-api";
-import { chat } from "../server/utils.js";
+import { chatWithAI } from "../server/utils.js";
 
 interface history {
   from: string;
@@ -20,6 +20,8 @@ const Chat = ({
   stage,
   history,
   setHistory,
+  riddle,
+  post,
 }: {
   setPage: (page: string) => void;
   context: Context;
@@ -27,17 +29,41 @@ const Chat = ({
   setGameId: (gameId: string) => void;
   stage: number;
   history: history[];
-  setHistory: (history: history[]) => void;
+  setHistory: (history: (prevHistory: history[]) => history[]) => void;
+  riddle: any;
+  post: any;
 }) => {
-  const { data: username } = useAsync(async () => {
-    const user = await context.reddit.getCurrentUser();
-    return user?.username as string;
-  });
+  const { reddit } = context;
+  const [message, setMessage] = useState("");
 
-  const { data: userId } = useAsync(async () => {
-    const user = await context.reddit.getCurrentUser();
-    return user?.id as string;
-  });
+  const { data: username } = useAsync(async () => {
+    const user = await reddit.getCurrentUser();
+    return user?.username as string;
+  }, { depends: [] });
+  
+  useAsync(
+    async () => {
+      if(message.trim().length === 0)
+        return "";
+      
+      const assistantResponse = (await chatWithAI(context, riddle, post, history, message))?.message;
+      console.log(assistantResponse);
+
+      return assistantResponse as string;
+    },
+    {
+      depends: [message],
+      finally: (data) => {
+        if (data) {
+          setHistory((prevHistory) => [
+            ...prevHistory,
+            { from: "assistant", text: data as string },
+          ]);
+          setMessage("")
+        }
+      },
+    },
+  );
 
   const myForm = useForm(
     {
@@ -54,30 +80,12 @@ const Chat = ({
       const userMessage = values.message as string;
       if (userMessage.trim() === "") return;
 
-      const resolvedUsername = username || "user";
-      const updatedHistory = [
-        ...history,
-        { from: resolvedUsername, text: userMessage },
-      ];
-      setHistory(updatedHistory);
+      setHistory((prevHistory) => [
+        ...prevHistory,
+        { from: username || "user", text: userMessage },
+      ]);
 
-      const assistantResponse = (
-        await chat(
-          context,
-          userId as string,
-          gameId,
-          stage,
-          updatedHistory,
-          userMessage,
-        )
-      )?.message;
-
-      if (assistantResponse) {
-        setHistory([
-          ...updatedHistory,
-          { from: "assistant", text: assistantResponse },
-        ]);
-      }
+      setMessage(userMessage);
     },
   );
 
@@ -93,7 +101,7 @@ const Chat = ({
       gap="small"
     >
       <vstack alignment="bottom start" gap="small">
-        {history.map((msg, index) => {
+        {history?.map((msg, index) => {
           return (
             <hstack key={index.toString()} gap="small" alignment="start">
               <text weight="bold" color="black">

@@ -115,45 +115,52 @@ const LoadingPage = ({
   setGameId: (gameId: string) => void;
 }) => {
   const { redis, reddit } = context;
-
-  if (!gameId) setGameId(generateHash(8));
-
-  const userId = useAsync(async () => {
-    const user = await reddit.getCurrentUser();
-    return user?.id as string;
-  });
-
-  useAsync(async () => {
-    const posts = await fetchPosts(5, reddit);
-    console.log(posts);
-
-    await redis.set(
-      `${context.postId}:users:${userId}:games:${gameId}:game-state:posts`,
-      JSON.stringify({ posts }),
-      {
-        expiration: new Date(new Date().getTime() + 1000 * 60 * 60), // TTL: 1hr
-      },
-    );
-
-    const response = await generateRiddles(
-      context,
-      userId.data as string,
-      gameId,
-    );
-
-    await redis.set(
-      `${context.postId}:users:${userId}:games:${gameId}:game-state:riddles`,
-      JSON.stringify({ riddles: response?.riddles }),
-      {
-        expiration: new Date(new Date().getTime() + 1000 * 60 * 60), // TTL: 1hr
-      },
-    );
-
-    setPage("game-screen");
-    return "";
-  });
-
   const [index, setIndex] = useState(0);
+
+  if (!gameId) {
+    let hash = generateHash(8);
+    setGameId(hash);
+  }
+
+  const { data: userId } = useAsync(
+    async () => {
+      const user = await reddit.getCurrentUser();
+      return user?.id as string;
+    },
+    { depends: [] },
+  );
+
+  const { data: ack } = useAsync(
+    async () => {
+      const posts = await fetchPosts(5, reddit);
+      await redis.set(
+        `${context.postId}:users:${userId}:games:${gameId}:game-state:posts`,
+        JSON.stringify({ posts }),
+        {
+          expiration: new Date(new Date().getTime() + 1000 * 60 * 60), // TTL: 1hr
+        },
+      );
+
+      const response = await generateRiddles(context, posts);
+      await redis.set(
+        `${context.postId}:users:${userId}:games:${gameId}:game-state:riddles`,
+        JSON.stringify({ riddles: response?.riddles }),
+        {
+          expiration: new Date(new Date().getTime() + 1000 * 60 * 60), // TTL: 1hr
+        },
+      );
+      await redis.set(
+        `${context.postId}:users:${userId}:games:${gameId}:game-state:status`,
+        "ready",
+        {
+          expiration: new Date(new Date().getTime() + 1000 * 60 * 60),
+        },
+      );
+      return "ready";
+    },
+    { depends: [] },
+  );
+
   const interval = useInterval(() => {
     if (index === phrases.length - 1) interval.stop();
     setIndex((i) => (i + 1) % phrases.length);
@@ -161,15 +168,20 @@ const LoadingPage = ({
   interval.start();
 
   const pollingInterval = useInterval(async () => {
-    const questReady = await redis.get(
-      `${context.postId}:users:${userId}:games:${gameId}:game-state:riddles`,
-    );
-
-    if (questReady) {
+    if (ack === "ready") {
       setPage("game-screen");
       pollingInterval.stop();
+      const questReady = await redis.get(
+        `${context.postId}:users:${userId}:games:${gameId}:game-state:status`,
+      );
+
+      if (questReady === "ready") {
+        setPage("game-screen");
+        pollingInterval.stop();
+      }
     }
   }, 1000 * 10);
+
   pollingInterval.start();
 
   return (

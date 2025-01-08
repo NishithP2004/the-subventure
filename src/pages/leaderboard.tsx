@@ -7,21 +7,29 @@ const Leaderboard = ({
   setPage: (page: string) => void;
   context: Context;
 }) => {
-  const { redis, reddit } = context;
+  const { redis } = context;
   const [members, setMembers] = useState<{ member: string; score: number }[]>(
     [],
   );
 
-  const { data: username } = useAsync(async () => {
-    const user = await reddit.getCurrentUser();
-    return user?.username as string;
-  });
+  useAsync(
+    async () => {
+      const members = await redis.zRange("leaderboard", 0, 9, { by: "rank" });
 
-  useAsync(async () => {
-    const members = await redis.zRange("leaderboard", 0, 9, { by: "rank" });
-    setMembers(members);
-    return "";
-  });
+      const typedMembers = members.map((member) => {
+        return { member: member.member, score: Number(member.score) };
+      });
+
+      return typedMembers;
+    },
+    {
+      finally: (data) => {
+        if (data) {
+          setMembers(data as { member: string; score: number }[]);
+        }
+      },
+    },
+  );
 
   return (
     <vstack
@@ -56,7 +64,7 @@ const Leaderboard = ({
             Score
           </text>
         </hstack>
-        {members.map((member, i) => (
+        {members?.map((member, i) => (
           <hstack
             key={member.member}
             width="100%"
@@ -67,7 +75,7 @@ const Leaderboard = ({
             gap="small"
           >
             <text width="10%" color="#555">
-              {i + 1}.
+              {i + 1}
             </text>
             <text width="45%" color="#555">
               {member.member}

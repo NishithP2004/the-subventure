@@ -1,8 +1,3 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
-/* import {
-    FileMetadataResponse,
-    GoogleAIFileManager
-} from "@google/generative-ai/server"; */
 import { AzureOpenAI } from "openai";
 import { Devvit } from "@devvit/public-api";
 
@@ -23,12 +18,12 @@ interface Post {
 interface RiddlesResponse {
   riddles: {
     subreddit: {
-      name: string; // Name of the subreddit
-      emoji: string; // Emoji representation of the subreddit name
+      name: string;
+      emoji: string;
     };
-    riddle: string; // Generated riddle inspired by the post
-    question: string; // A question based on the post
-    answer: string; // Answer for the above question
+    riddle: string;
+    question: string;
+    answer: string;
   }[];
 }
 
@@ -96,70 +91,14 @@ The response must strictly follow this JSON format:
     "prompt": "Image generation prompt based on the storyline which will be passed to a Stable Diffusion model"
 }
 `;
+
 async function generateRiddles(
   context: Devvit.Context,
-  userId: string,
-  gameId: string,
+  posts: Post[],
 ): Promise<RiddlesResponse | undefined> {
   try {
     const apiKey = (await context.settings.get("gemini-api-key")) as string;
-
-    /* const genAI = new GoogleGenerativeAI(apiKey);
-        const model = genAI.getGenerativeModel({
-            model: "gemini-1.5-flash"
-        })
-
-        const fileManager = new GoogleAIFileManager(apiKey);
-
-        async function uploadToGemini(path: string, mimeType: string): Promise<FileMetadataResponse> {
-            const uploadResult = await fileManager.uploadFile(path, {
-                mimeType,
-                displayName: path,
-            });
-            const file = uploadResult.file;
-            console.log(`Uploaded file ${file.displayName} as: ${file.name}`);
-            return file;
-        }
-        
-        async function waitForFilesActive(files: FileMetadataResponse[]) {
-            console.log("Waiting for file processing...");
-            for (const name of files.map((file) => file.name)) {
-                let file = await fileManager.getFile(name);
-                while (file.state === "PROCESSING") {
-                    await new Promise((resolve) => setTimeout(resolve, 10000));
-                    file = await fileManager.getFile(name)
-                }
-                if (file.state !== "ACTIVE") {
-                    throw Error(`File ${file.name} failed to process`);
-                }
-            }
-            console.log("...all files ready\n");
-        } 
-
-        const chatSession = model.startChat({
-            generationConfig: {
-                temperature: 1,
-                responseMimeType: "application/json"
-            },
-            systemInstruction: {
-                text: RIDDLE_GENERATION_PROMPT
-            },
-            history: []
-        })
-
-        const result = await chatSession.sendMessage(`
-        Use the following example posts to generate riddles and adhere to the JSON format:
-        ${posts?.toString()}
-    `)
-
-        return JSON.parse(result.response.text()).riddles */
-
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model_name}:generateContent`;
-    const { redis } = context;
-
-    const posts = await redis.get(
-      `${context.postId}:users:${userId}:games:${gameId}:game-state:posts`,
-    );
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model_name}:generateContent?key=${apiKey}`;
     const requestBody = {
       contents: [
         {
@@ -167,10 +106,9 @@ async function generateRiddles(
           parts: [
             {
               text: `
-                        Use the following posts to generate riddles and adhere to the JSON format:
-                        
-                        ${posts}
-                    `,
+                          Use the following posts to generate riddles and adhere to the JSON format:
+                          ${JSON.stringify({ posts })}
+                      `,
             },
           ],
         },
@@ -197,14 +135,10 @@ async function generateRiddles(
       },
       body: JSON.stringify(requestBody),
     }).then((response) => {
-      console.log(`Status: ${response.status}`);
       return response.json();
     });
-
-    console.log(response.candidates[0].content);
     const riddles = response.candidates[0].content.parts[0].text;
-    console.log(riddles);
-
+    console.log(riddles)
     return JSON.parse(riddles as string) as RiddlesResponse;
   } catch (err: unknown) {
     if (err instanceof Error) {
@@ -213,31 +147,18 @@ async function generateRiddles(
   }
 }
 
-async function chat(
+async function chatWithAI(
   context: Devvit.Context,
-  userId: string,
-  gameId: string,
-  stage: number,
+  riddle: any,
+  post: any,
   conversation_history: { from: string; text: string }[],
   query: string,
 ): Promise<{ message: string } | undefined> {
   try {
     const apiKey = (await context.settings.get("gemini-api-key")) as string;
-
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model_name}:generateContent?key=${apiKey}`;
-    const { redis } = context;
-
-    const post = JSON.parse(
-      (await redis.get(
-        `${context.postId}:users:${userId}:games:${gameId}:game-state:posts`,
-      )) as string,
-    ).posts[stage - 1];
-    const riddle = JSON.parse(
-      (await redis.get(
-        `${context.postId}:users:${userId}:games:${gameId}:game-state:riddles`,
-      )) as string,
-    ).riddles[stage - 1];
     const history = Array.from(conversation_history).splice(-1, 5);
+
     const requestBody = {
       contents: [
         {
@@ -245,27 +166,27 @@ async function chat(
           parts: [
             {
               text: `
-                        User History (The ongoing conversation history between you and the user.): 
-                        ${history} 
-                        `,
+                              User History (The ongoing conversation history between you and the user.): 
+                              ${JSON.stringify(history)} 
+                              `,
             },
             {
               text: `
-                        Post Information (Details of the Reddit post tied to the riddle): 
-                        ${JSON.stringify(post)} 
-                        `,
+                              Post Information (Details of the Reddit post tied to the riddle): 
+                              ${JSON.stringify(post)} 
+                              `,
             },
             {
               text: `
-                        Associated Riddle Object: 
-                        ${JSON.stringify(riddle)}
-                        `,
+                              Associated Riddle Object: 
+                              ${JSON.stringify(riddle)}
+                              `,
             },
             {
               text: `
-                        User Query (The current query or input from the user about the riddle.): 
-                        ${query} 
-                        `,
+                              User Query (The current query or input from the user about the riddle.): 
+                              ${query} 
+                              `,
             },
           ],
         },
@@ -294,10 +215,8 @@ async function chat(
     }).then((response) => {
       return response.json();
     });
-
     const message = response.candidates[0].content.parts[0].text;
-    console.log(message);
-
+    console.log(message)
     return JSON.parse(message as string) as { message: string };
   } catch (err: unknown) {
     if (err instanceof Error) {
@@ -308,21 +227,14 @@ async function chat(
 
 async function generateStoryline(
   context: Devvit.Context,
-  userId: string,
-  gameId: string,
+  riddles: any,
   conversation_history: { from: string; text: string }[],
 ): Promise<
   { title: string; storyline: string; thumbnail: string } | undefined
 > {
   try {
     const apiKey = (await context.settings.get("gemini-api-key")) as string;
-
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model_name}:generateContent?key=${apiKey}`;
-    const { redis } = context;
-
-    const riddles = (await redis.get(
-      `${context.postId}:users:${userId}:games:${gameId}:game-state:riddles`,
-    )) as string;
     const history = Array.from(conversation_history);
     const requestBody = {
       contents: [
@@ -331,15 +243,15 @@ async function generateStoryline(
           parts: [
             {
               text: `
-                        Conversation History (A record of the ongoing interaction between the user and the assistant, including solved riddles, hints given, and user comments.): 
-                        ${history} 
-                        `,
+                              Conversation History (A record of the ongoing interaction between the user and the assistant, including solved riddles, hints given, and user comments.): 
+                              ${history} 
+                              `,
             },
             {
               text: `
-                        Riddles Object: 
-                        ${riddles}
-                        `,
+                              Riddles Object: 
+                              ${JSON.stringify(riddles)}
+                              `,
             },
           ],
         },
@@ -368,10 +280,7 @@ async function generateStoryline(
     }).then((response) => {
       return response.json();
     });
-
     const result = response.candidates[0].content.parts[0].text;
-    console.log(result);
-
     const { title, storyline, prompt } = JSON.parse(result as string);
     const thumbnail = await generateThumbnail(context, prompt);
 
@@ -382,7 +291,7 @@ async function generateStoryline(
     };
   } catch (err: unknown) {
     if (err instanceof Error) {
-      console.error("Error generating riddles:", err.message);
+      console.error("Error generating storyline:", err.message);
     }
   }
 }
@@ -397,12 +306,14 @@ async function generateThumbnail(
 
   const model = new AzureOpenAI({
     apiKey: apiKey,
+    apiVersion: "2024-02-01",
     deployment: "dall-e-3",
     endpoint: apiEndpoint,
   });
 
   async function generateImage(prompt: string): Promise<string> {
     try {
+      return "https://nishithp.dev"
       const image = await model.images.generate({
         prompt: prompt,
         model: "dall-e-3",
@@ -422,4 +333,4 @@ async function generateThumbnail(
   return generateImage(prompt);
 }
 
-export { generateRiddles, chat, generateStoryline };
+export { generateRiddles, chatWithAI, generateStoryline };

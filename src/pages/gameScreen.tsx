@@ -1,8 +1,8 @@
 import {
   Devvit,
   Context,
-  useAsync,
   useState,
+  useAsync,
   RichTextBuilder,
 } from "@devvit/public-api";
 import Chat from "./chat.js";
@@ -16,10 +16,10 @@ async function createPost(
   thumbnail: string,
 ) {
   try {
-    const response = await context.media.upload({
+    /* const response = await context.media.upload({
       url: thumbnail,
       type: "image",
-    });
+    }); */
 
     const richtext = new RichTextBuilder()
       .paragraph((paragraph) =>
@@ -30,20 +30,21 @@ async function createPost(
       )
       .paragraph((paragraph) => {
         paragraph.text({
-          text: storyline,
+          text: `u/${username}\n\n` + storyline,
         });
-      })
-      .image({ mediaId: response.mediaId });
+      });
+    // .image({ mediaId: response.mediaId });
 
-    await context.reddit.submitPost({
+    const post = await context.reddit.submitPost({
       subredditName: context.subredditName as string,
       title: title,
       richtext: richtext,
     });
 
-    context.ui.showToast("Rich Post created successfully!");
+    context.ui.showToast("Storyline created successfully!");
+    context.ui.navigateTo(post.url);
   } catch (err) {
-    context.ui.showToast(`Error creating Rich Post: ${err}`);
+    context.ui.showToast(`Error creating storyline`);
   }
 }
 const GameScreen = ({
@@ -58,68 +59,93 @@ const GameScreen = ({
   setGameId: (gameId: string) => void;
 }) => {
   const { redis, reddit } = context;
-  /* context.ui.webView.postMessage('myWebView', {
-        type: 'riddles',
-        data: {
-            "gameId": gameId,
-            "riddles": [
-                {
-                    "subreddit": {
-                        "name": "AnimalsBeingBros",
-                        "emoji": "🦓🦁"
-                    },
-                    "riddle": "I’m where loyalty shines in nature’s domain, when one is in danger, another takes the strain. Seek my name where friendships are raw, animals unite with a moment of awe.",
-                    "question": "What species is mentioned in the post title?",
-                    "answer": "bird"
-                },
-                {
-                    "subreddit": {
-                        "name": "explainlikeimfive",
-                        "emoji": "🤔📚"
-                    },
-                    "riddle": "I measure energy in bites and bowls, science reveals my invisible roles. Find me where answers come concise, explained for a mind that seeks simple advice.",
-                    "question": "How many calories are there in 100g of chicken?",
-                    "answer": "240 kcal"
-                }
-            ]
-        },
-      }); */
-  const [stage, setStage] = useState(0);
-  const [history, setHistory] = useState([
+  const [stage, setStage] = useState(1);
+  const [history, setHistory] = useState<any[]>([
     {
       from: "assistant",
       text: "Welcome to the Chat!",
     },
   ]);
-  /* const [riddles, setRiddles] = useState(null)
-      const [posts, setPosts] = useState(null) */
+  const [riddles, setRiddles] = useState([]);
+  const [posts, setPosts] = useState([]);
 
   const { data: userId } = useAsync(async () => {
     const user = await reddit.getCurrentUser();
     return user?.id as string;
   });
 
-  useAsync(async () => {
-    const riddles = JSON.parse(
-      (await redis.get(
-        `${context.postId}:users:${userId}:games:${gameId}:game-state:riddles`,
-      )) as string,
-    ).riddles;
-    console.log(riddles);
-    /* setRiddles(riddles)
-        const posts = JSON.parse((await redis.get(`${context.postId}:users:${userId}:games:${gameId}:game-state:posts`)) as string).posts
-        setPosts(posts) */
+  useAsync(
+    async () => {
+      const riddles = JSON.parse(
+        (await redis.get(
+          `${context.postId}:users:${userId}:games:${gameId}:game-state:riddles`,
+        )) as string,
+      ).riddles;
 
-    context.ui.webView.postMessage("myWebView", {
-      type: "riddles",
-      data: {
-        gameId: gameId,
+      const posts = JSON.parse(
+        (await redis.get(
+          `${context.postId}:users:${userId}:games:${gameId}:game-state:posts`,
+        )) as string,
+      ).posts;
+
+      context.ui.webView.postMessage("myWebView", {
+        type: "riddles",
+        data: {
+          gameId: gameId,
+          userId: userId,
+          riddles,
+        },
+      });
+
+      return {
         riddles,
+        posts,
+      };
+    },
+    {
+      finally: (data) => {
+        if (data) {
+          setRiddles(data.riddles);
+          setPosts(data.posts);
+        }
       },
-    });
-    return "";
-  });
+    },
+  );
 
+  const handleWebViewMessage = async (msg: any) => {
+    if (msg.type === "game-state") {
+      if (msg.data.status === "ongoing") {
+        setStage(msg.data.stage);
+      } else if (msg.data.status === "complete") {
+        const user = await reddit.getCurrentUser();
+        await redis.zIncrBy(
+          "leaderboard",
+          user?.username as string,
+          msg.data.score,
+        );
+
+        /* console.log("Game Status:", await redis.get(`${context.postId}:users:${user?.id}:games:${gameId}:game-state:status`))
+        const riddles = JSON.parse(
+          (await redis.get(
+            `${context.postId}:users:${user?.id as string}:games:${gameId}:game-state:riddles`,
+          )) as string,
+        ).riddles; */
+
+        const response = await generateStoryline(
+          context,
+          msg.data.riddles,
+          history,
+        );
+        await createPost(
+          context,
+          user?.username as string,
+          response?.title as string,
+          response?.storyline as string,
+          response?.thumbnail as string,
+        );
+      }
+    }
+  };
   return (
     <hstack
       alignment="center middle"
@@ -133,37 +159,7 @@ const GameScreen = ({
       <webview
         id="myWebView"
         url="index.html"
-        onMessage={(msg: any) => {
-          console.log("Received from webview:", msg);
-          if (msg.type === "game-state") {
-            if (msg.data.status === "ongoing") {
-              setStage(msg.data.stage);
-            } else if (msg.data.status === "complete") {
-              useAsync(async () => {
-                const user = await reddit.getCurrentUser();
-                await redis.zAdd("leaderboard", {
-                  member: user?.username as string,
-                  score: msg.data.score,
-                });
-
-                const response = await generateStoryline(
-                  context,
-                  userId as string,
-                  gameId,
-                  history,
-                );
-                await createPost(
-                  context,
-                  user?.username as string,
-                  response?.title as string,
-                  response?.storyline as string,
-                  response?.thumbnail as string,
-                );
-                return "";
-              });
-            }
-          }
-        }}
+        onMessage={handleWebViewMessage}
         width="50%"
         height="100%"
       />
@@ -175,6 +171,8 @@ const GameScreen = ({
         stage={stage}
         history={history}
         setHistory={setHistory}
+        riddle={riddles[stage - 1]}
+        post={posts[stage - 1]}
       />
     </hstack>
   );

@@ -10,7 +10,7 @@ Devvit.configure({
   redditAPI: true,
   http: true,
   redis: true,
-  media: true,
+  media: true
 });
 
 Devvit.addSettings([
