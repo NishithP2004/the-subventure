@@ -16,10 +16,10 @@ async function createPost(
   thumbnail: string,
 ) {
   try {
-    /* const response = await context.media.upload({
+    const response = await context.media.upload({
       url: thumbnail,
       type: "image",
-    }); */
+    });
 
     const richtext = new RichTextBuilder()
       .paragraph((paragraph) =>
@@ -32,8 +32,8 @@ async function createPost(
         paragraph.text({
           text: `u/${username}\n\n` + storyline,
         });
-      });
-    // .image({ mediaId: response.mediaId });
+      })
+      .image({ mediaId: response.mediaId });
 
     const post = await context.reddit.submitPost({
       subredditName: context.subredditName as string,

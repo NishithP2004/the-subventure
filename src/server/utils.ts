@@ -313,12 +313,11 @@ async function generateThumbnail(
 
   async function generateImage(prompt: string): Promise<string> {
     try {
-      return "https://nishithp.dev"
       const image = await model.images.generate({
         prompt: prompt,
         model: "dall-e-3",
         quality: "standard",
-        size: "512x512",
+        size: "1024x1024",
         response_format: "url",
         n: 1,
       });
@@ -326,6 +325,7 @@ async function generateThumbnail(
       return image.data[0].url as string;
     } catch (err) {
       console.error("Error generating image.");
+      console.log(err)
       throw err;
     }
   }

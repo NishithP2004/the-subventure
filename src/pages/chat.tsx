@@ -40,7 +40,7 @@ const Chat = ({
     const user = await reddit.getCurrentUser();
     return user?.username as string;
   }, { depends: [] });
-  
+
   useAsync(
     async () => {
       if(message.trim().length === 0)
@@ -59,7 +59,6 @@ const Chat = ({
             ...prevHistory,
             { from: "assistant", text: data as string },
           ]);
-          setMessage("")
         }
       },
     },
@@ -85,7 +84,7 @@ const Chat = ({
         { from: username || "user", text: userMessage },
       ]);
 
-      setMessage(userMessage);
+       setMessage(userMessage);
     },
   );
 
