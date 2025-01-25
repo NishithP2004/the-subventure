@@ -35,29 +35,27 @@ const Chat = ({
 }) => {
   const { reddit } = context;
   const [message, setMessage] = useState("");
-
-  const { data: username } = useAsync(async () => {
-    const user = await reddit.getCurrentUser();
-    return user?.username as string;
-  }, { depends: [] });
+  const [username, setUsername] = useState("user")
 
   useAsync(
     async () => {
-      if(message.trim().length === 0)
+      if(history.at(-1)?.from === "assistant")
         return "";
       
       const assistantResponse = (await chatWithAI(context, riddle, post, history, message))?.message;
       console.log(assistantResponse);
 
-      return assistantResponse as string;
+      const user = await reddit.getCurrentUser();
+      return { message: assistantResponse as string, username: user?.username as string };
     },
     {
       depends: [message],
       finally: (data) => {
         if (data) {
+          setUsername(data.username)
           setHistory((prevHistory) => [
             ...prevHistory,
-            { from: "assistant", text: data as string },
+            { from: "assistant", text: data.message as string },
           ]);
         }
       },
@@ -81,7 +79,7 @@ const Chat = ({
 
       setHistory((prevHistory) => [
         ...prevHistory,
-        { from: username || "user", text: userMessage },
+        { from: username, text: userMessage },
       ]);
 
        setMessage(userMessage);
